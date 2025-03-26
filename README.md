@@ -115,4 +115,4 @@ Check out the examples directory for more usage patterns:
 
 ## License
 
-MIT License
+dronomy.io License
