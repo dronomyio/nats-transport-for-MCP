@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-nats-transport"
+version = "0.1.0"
+description = "NATS Transport for Model Context Protocol (MCP)"
+readme = "README.md"
+authors = [
+    {name = "MCP Contributors", email = "noreply@example.com"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "mcp",
+    "nats-py",
+    "anyio",
+    "pydantic",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "isort",
+    "mypy",
+    "pytest",
+    "pytest-asyncio",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/modelcontextprotocol/nats-transport"
+"Documentation" = "https://modelcontextprotocol.io/docs/concepts/nats-transport/"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["mcp_nats_transport"]
+
+[tool.black]
+line-length = 100
+target-version = ["py38"]
+
+[tool.isort]
+profile = "black"
+line_length = 100

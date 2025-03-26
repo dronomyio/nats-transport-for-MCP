@@ -1,0 +1,208 @@
+version: '3'
+
+services:
+  # NATS Server
+  nats:
+    image: nats:latest
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["--jetstream", "--http_port=8222"]
+    networks:
+      - mcp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  # MCP Weather Server
+  mcp-weather-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SERVER_TYPE=weather
+      - REQUEST_SUBJECT=mcp.request
+      - RESPONSE_SUBJECT=mcp.response
+    command: >
+      python -c "
+      import asyncio, anyio, os
+      from examples.distributed_example import create_weather_server, nats_server, Session
+      from mcp.server.nats_transport import NatsServerParameters
+      
+      async def run():
+          server = await create_weather_server()
+          nats_params = NatsServerParameters(
+              url=os.environ.get('NATS_URL', 'nats://nats:4222'),
+              request_subject=os.environ.get('REQUEST_SUBJECT', 'mcp.request'),
+              response_subject=os.environ.get('RESPONSE_SUBJECT', 'mcp.response'),
+              server_id='mcp-weather-server'
+          )
+          async with nats_server(nats_params) as (read_stream, write_stream):
+              session = Session()
+              await server.run(session, read_stream, write_stream)
+      
+      anyio.run(run)
+      "
+    networks:
+      - mcp-network
+
+  # MCP Calculator Server
+  mcp-calculator-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SERVER_TYPE=calculator
+      - REQUEST_SUBJECT=mcp.request
+      - RESPONSE_SUBJECT=mcp.response
+    command: >
+      python -c "
+      import asyncio, anyio, os
+      from examples.distributed_example import create_calculator_server, nats_server, Session
+      from mcp.server.nats_transport import NatsServerParameters
+      
+      async def run():
+          server = await create_calculator_server()
+          nats_params = NatsServerParameters(
+              url=os.environ.get('NATS_URL', 'nats://nats:4222'),
+              request_subject=os.environ.get('REQUEST_SUBJECT', 'mcp.request'),
+              response_subject=os.environ.get('RESPONSE_SUBJECT', 'mcp.response'),
+              server_id='mcp-calculator-server'
+          )
+          async with nats_server(nats_params) as (read_stream, write_stream):
+              session = Session()
+              await server.run(session, read_stream, write_stream)
+      
+      anyio.run(run)
+      "
+    networks:
+      - mcp-network
+
+  # MCP Text Server
+  mcp-text-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SERVER_TYPE=text
+      - REQUEST_SUBJECT=mcp.request
+      - RESPONSE_SUBJECT=mcp.response
+    command: >
+      python -c "
+      import asyncio, anyio, os
+      from examples.distributed_example import create_text_server, nats_server, Session
+      from mcp.server.nats_transport import NatsServerParameters
+      
+      async def run():
+          server = await create_text_server()
+          nats_params = NatsServerParameters(
+              url=os.environ.get('NATS_URL', 'nats://nats:4222'),
+              request_subject=os.environ.get('REQUEST_SUBJECT', 'mcp.request'),
+              response_subject=os.environ.get('RESPONSE_SUBJECT', 'mcp.response'),
+              server_id='mcp-text-server'
+          )
+          async with nats_server(nats_params) as (read_stream, write_stream):
+              session = Session()
+              await server.run(session, read_stream, write_stream)
+      
+      anyio.run(run)
+      "
+    networks:
+      - mcp-network
+
+  # MCP Client
+  mcp-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      - mcp-weather-server
+      - mcp-calculator-server
+      - mcp-text-server
+    environment:
+      - NATS_URL=nats://nats:4222
+      - REQUEST_SUBJECT=mcp.request
+      - RESPONSE_SUBJECT=mcp.response
+    command: >
+      python -c "
+      import asyncio, anyio, os, time, logging
+      from mcp.client.session import ClientSession
+      from mcp.client.nats_transport import NatsClientParameters, nats_client
+      
+      logging.basicConfig(level=logging.INFO)
+      logger = logging.getLogger(__name__)
+      
+      async def run():
+          # Wait to ensure servers are fully initialized
+          await asyncio.sleep(5)
+          
+          # Configure NATS transport
+          nats_params = NatsClientParameters(
+              url=os.environ.get('NATS_URL', 'nats://nats:4222'),
+              request_subject=os.environ.get('REQUEST_SUBJECT', 'mcp.request'),
+              response_subject=os.environ.get('RESPONSE_SUBJECT', 'mcp.response'),
+              client_id='mcp-docker-client'
+          )
+          
+          logger.info('Starting MCP client with NATS transport')
+          
+          try:
+              # Connect to the servers using NATS transport
+              async with nats_client(nats_params) as (read_stream, write_stream):
+                  # Create a client session
+                  client = ClientSession()
+                  
+                  # Run initialization
+                  await client.initialize(read_stream, write_stream)
+                  
+                  # Get available tools
+                  tools = await client.list_tools()
+                  logger.info(f'Available tools: {[tool.name for tool in tools.tools]}')
+                  
+                  # Call tools from different servers
+                  if 'get_weather' in [t.name for t in tools.tools]:
+                      result = await client.call_tool('get_weather', {'location': 'London'})
+                      logger.info(f'Weather result: {result.content[0].text}')
+                  
+                  if 'add' in [t.name for t in tools.tools]:
+                      result = await client.call_tool('add', {'a': 5, 'b': 3})
+                      logger.info(f'Calculator result: {result.content[0].text}')
+                  
+                  if 'to_uppercase' in [t.name for t in tools.tools]:
+                      result = await client.call_tool('to_uppercase', {'text': 'hello world'})
+                      logger.info(f'Text result: {result.content[0].text}')
+                  
+                  # Try to get available prompts
+                  prompts = await client.list_prompts()
+                  if prompts.prompts:
+                      logger.info(f'Available prompts: {[p.name for p in prompts.prompts]}')
+                      
+                      # Use a weather prompt if available
+                      if 'weather_prompt' in [p.name for p in prompts.prompts]:
+                          result = await client.get_prompt('weather_prompt', {'location': 'Tokyo'})
+                          logger.info(f'Prompt result: {result.messages[0].content.text}')
+          except Exception as e:
+              logger.exception(f'Client error: {e}')
+      
+      anyio.run(run)
+      "
+    networks:
+      - mcp-network
+
+networks:
+  mcp-network:
+    driver: bridge
