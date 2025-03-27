@@ -83,6 +83,8 @@ async with nats_client(nats_params) as (read_stream, write_stream):
 
 A Docker Compose configuration is provided for easy deployment of NATS server with examples:
 
+### Running the Full MCP Example
+
 ```bash
 docker-compose up
 ```
@@ -91,6 +93,71 @@ This will start:
 - A NATS server
 - An example MCP server with tools
 - An example MCP client that connects to the server
+
+### Running the Simple NATS Example
+
+A simplified example that demonstrates the core NATS request/reply pattern is available:
+
+```bash
+docker-compose -f docker-compose-simple.yml up
+```
+
+This runs a single container that demonstrates both the server and client sides of NATS communication.
+
+### Testing Individually in Separate Windows
+
+To test the components separately:
+
+1. **Start the NATS server in one terminal**:
+   ```bash
+   docker run -p 4222:4222 -p 8222:8222 nats:latest --jetstream
+   ```
+
+2. **Run the server component in another terminal**:
+   ```bash
+   python -c "
+   import asyncio
+   import logging
+   from docker_example import run_server
+   logging.basicConfig(level=logging.INFO)
+   asyncio.run(run_server('nats://localhost:4222'))
+   "
+   ```
+
+3. **Run the client component in a third terminal**:
+   ```bash
+   python -c "
+   import asyncio
+   import logging
+   from docker_example import run_client
+   logging.basicConfig(level=logging.INFO)
+   asyncio.run(run_client('nats://localhost:4222'))
+   "
+   ```
+
+You can also create simple server.py and client.py files to make this easier:
+
+**server.py**:
+```python
+import asyncio
+import logging
+from docker_example import run_server
+
+logging.basicConfig(level=logging.INFO)
+asyncio.run(run_server('nats://localhost:4222'))
+```
+
+**client.py**:
+```python
+import asyncio
+import logging
+from docker_example import run_client
+
+logging.basicConfig(level=logging.INFO)
+asyncio.run(run_client('nats://localhost:4222'))
+```
+
+Then run each script in a separate terminal after starting the NATS server.
 
 ## Documentation
 
