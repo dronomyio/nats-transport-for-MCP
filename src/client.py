@@ -135,20 +135,20 @@ async def nats_client(params: NatsClientParameters):
             async with write_stream_reader:
                 async for message in write_stream_reader:
                     # Check if this is a request or notification
-                    is_request = isinstance(message.root, types.JSONRPCRequest)
+                    is_request = isinstance(message.root, types.JSONRPCRequest) #Check if message is a JSON-RPC request
                     
                     # Convert to JSON
-                    message_json = message.model_dump_json(by_alias=True, exclude_none=True)
+                    message_json = message.model_dump_json(by_alias=True, exclude_none=True) #Serialize JSON-RPC message to JSON text
                     
                     if is_request:
                         # For requests, use request/reply pattern
-                        method_name = message.root.method
+                        method_name = message.root.method #Map JSON-RPC method to NATS subject
                         subject = f"{params.service_name}.{method_name}"
                         
                         try:
                             # Use the NATS request method for proper request/reply
                             logger.debug(f"Sending request to {subject}")
-                            response = await nc.request(
+                            response = await nc.request( # Send JSON-RPC request via NATS request method
                                 subject, 
                                 message_json.encode('utf-8'),
                                 timeout=params.request_timeout
@@ -156,9 +156,9 @@ async def nats_client(params: NatsClientParameters):
                             
                             # Process the response
                             try:
-                                response_text = response.data.decode('utf-8')
+                                response_text = response.data.decode('utf-8') #Parse response data as JSON-RPC message
                                 response_message = types.JSONRPCMessage.model_validate_json(response_text)
-                                await read_stream_writer.send(response_message)
+                                await read_stream_writer.send(response_message) #Forward JSON-RPC response to MCP via streams
                             except ValidationError as exc:
                                 await read_stream_writer.send(exc)
                         except Exception as exc:
