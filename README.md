@@ -426,6 +426,81 @@ if __name__ == "__main__":
 4. **Location Transparency**: Clients don't need to know where servers are deployed
 5. **Scalability**: Easily add more servers or models without changing client code
 
+## Suitable Applications for Distributed MCP
+
+When designing applications for distributed MCP with NATS transport, consider latency requirements. Not all applications are well-suited for cross-cloud deployment.
+
+### Ideal Applications (Latency Tolerant)
+
+#### 1. Asynchronous Content Generation (1-10+ seconds)
+- Document generation (legal documents, reports, summaries)
+- Marketing content (blog posts, product descriptions)
+- Creative writing (stories, scripts based on prompts)
+- Code generation (boilerplate code, documentation, tests)
+
+#### 2. Batch Processing Applications (Minutes to hours)
+- Data analysis workflows processing large datasets
+- Overnight document processing (contracts, reports)
+- Media processing (generating captions, descriptions)
+- Research data mining from scientific literature
+
+#### 3. Semi-Real-Time Advisory Systems (500ms-3s)
+- Expert advisory systems (medical, legal, financial)
+- Complex customer support requiring specialized knowledge
+- Research assistants for literature reviews
+- Multi-step reasoning applications across domains
+
+#### 4. Hybrid Human-AI Workflows (Variable latency)
+- Human-in-the-loop review systems
+- Collaborative writing/coding environments
+- Decision support systems
+- Educational tools and AI tutors
+
+#### 5. Multi-Modal Applications (Variable latency)
+- Document processing (text and images)
+- Research tools processing diverse data types
+- Content creation across media types
+- Rich knowledge base querying
+
+### Less Suitable Applications (Latency Sensitive)
+
+#### 1. Conversational AI (Requires <500ms)
+- Real-time chat interfaces
+- Voice assistants
+- Interactive customer service
+
+#### 2. Real-Time Decision Systems (Requires <100ms)
+- Trading systems
+- Real-time monitoring
+- Autonomous systems
+- Gaming AI
+
+#### 3. Embedded Applications (Requires local processing)
+- Mobile app features
+- Edge devices
+- Offline-capable systems
+
+### Latency Considerations
+
+When implementing a distributed MCP system with NATS, expect:
+- **Network latency between clouds**: 50-150ms between major regions
+- **NATS message routing**: 5-20ms overhead
+- **Model inference time**: 200ms-10s+ depending on model size
+- **Request serialization/deserialization**: 5-20ms
+
+Typical round-trip latency for cross-cloud model calls:
+- **Best case**: ~500ms (small models, same region)
+- **Typical case**: 1-5 seconds (medium models, different regions)
+- **Complex case**: 5-30+ seconds (large models, complex inputs)
+
+### Optimizing for Mixed Latency Requirements
+
+For applications with mixed latency requirements:
+1. **Hybrid deployment**: Place latency-sensitive models closer to clients
+2. **Model cascading**: Use faster models first, fall back to larger models when needed
+3. **Caching**: Implement result caching for common queries
+4. **Asynchronous design**: Use callbacks or webhooks for longer-running tasks
+
 ## Requirements
 
 - Python 3.8+
