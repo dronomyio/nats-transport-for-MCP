@@ -4,7 +4,7 @@ Example demonstrating how to use NATS transport with MCP.
 This example shows:
 1. Setting up a NATS-based MCP server
 2. Connecting to it with a NATS-based MCP client
-3. Exchanging messages between them
+3. Exchanging messages between them using the NATS services API
 
 Requirements:
 - NATS server running (e.g., `docker run -p 4222:4222 nats`)
@@ -12,7 +12,7 @@ Requirements:
 
 Run this example:
 ```
-python -m examples.fastmcp.nats_transport
+python -m examples.simple_example
 ```
 """
 
@@ -20,13 +20,13 @@ import asyncio
 import logging
 from contextlib import AsyncExitStack
 
-import anyio
 import sys
 import os
 
 # Add the parent directory to sys.path to import the package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import anyio
 from src.client import NatsClientParameters, nats_client
 from mcp.client.session import ClientSession
 from mcp.server.fastmcp.server import FastMcpServer
@@ -57,10 +57,11 @@ async def run_server():
     # Register our echo tool
     server.tools.register(echo)
     
-    # Configure NATS transport
+    # Configure NATS transport with service
     nats_params = NatsServerParameters(
-        request_subject="mcp.request",
-        response_subject="mcp.response",
+        url="nats://localhost:4222",
+        service_name="mcp.service",
+        server_id="echo-server-1",
     )
     
     logger.info("Starting MCP server with NATS transport")
@@ -80,10 +81,11 @@ async def run_client():
     # Wait a bit to ensure server is running
     await asyncio.sleep(1)
     
-    # Configure NATS transport
+    # Configure NATS transport with service
     nats_params = NatsClientParameters(
-        request_subject="mcp.request",
-        response_subject="mcp.response",
+        url="nats://localhost:4222",
+        service_name="mcp.service",
+        client_id="echo-client-1",
     )
     
     logger.info("Starting MCP client with NATS transport")
@@ -101,7 +103,7 @@ async def run_client():
         logger.info(f"Available tools: {[tool.name for tool in tools.tools]}")
         
         # Call the echo tool
-        result = await client.call_tool("echo", {"text": "Hello via NATS!"})
+        result = await client.call_tool("echo", {"text": "Hello via NATS service!"})
         logger.info(f"Echo result: {result.content[0].text}")
 
 

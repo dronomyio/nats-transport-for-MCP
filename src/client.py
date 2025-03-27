@@ -9,8 +9,7 @@ Example usage:
     async def run_client():
         nats_config = NatsClientParameters(
             url="nats://localhost:4222",
-            request_subject="mcp.request",
-            response_subject="mcp.response"
+            service_name="mcp.service"
         )
         async with nats_client(nats_config) as (read_stream, write_stream):
             # read_stream contains incoming JSONRPCMessages from the server
@@ -24,13 +23,14 @@ Example usage:
 
 import json
 import logging
+import uuid
 from contextlib import asynccontextmanager
+from typing import Dict, Optional
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from pydantic import BaseModel, Field
 from nats.aio.client import Client as NatsClient
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 import mcp.types as types
 
@@ -43,24 +43,27 @@ class NatsClientParameters(BaseModel):
     url: str = "nats://localhost:4222"
     """The URL of the NATS server to connect to."""
     
-    request_subject: str
-    """The subject to publish requests to."""
+    service_name: str = "mcp.service"
+    """The name of the MCP service to connect to."""
     
-    response_subject: str 
-    """The subject to receive responses from."""
-    
-    client_id: str = Field(default_factory=lambda: f"mcp-client-{anyio.to_thread.current_default_thread_limiter().statistics().borrowed_tokens}")
+    client_id: str = Field(default_factory=lambda: f"mcp-client-{uuid.uuid4().hex[:8]}")
     """A unique identifier for this client."""
     
     connect_timeout: float = 10.0
     """Timeout in seconds for connecting to the NATS server."""
+    
+    request_timeout: float = 30.0
+    """Timeout in seconds for service requests."""
+    
+    subscription_subjects: Optional[Dict[str, str]] = None
+    """Custom subscription subjects for notifications."""
 
 
 @asynccontextmanager
 async def nats_client(params: NatsClientParameters):
     """
     Client transport for NATS: this will connect to a server by establishing
-    a connection to a NATS server and communicating via pub/sub messaging.
+    a connection to a NATS server and communicating via service requests.
     
     Yields a tuple of (read_stream, write_stream) where:
     - read_stream: A stream from which to read incoming JSONRPCMessage objects
@@ -88,60 +91,105 @@ async def nats_client(params: NatsClientParameters):
     
     logger.info(f"Connected to NATS server at {params.url} as {params.client_id}")
     
-    async def nats_reader():
-        """Reads messages from NATS and forwards them to read_stream_writer."""
-        try:
-            async with read_stream_writer:
-                # Subscribe to response subject
-                sub = await nc.subscribe(
-                    params.response_subject, 
-                    queue=f"mcp-client-{params.client_id}"
-                )
-                
-                logger.debug(f"Subscribed to {params.response_subject}")
-                
-                async for msg in sub.messages:
-                    try:
-                        raw_text = msg.data.decode('utf-8')
-                        message = types.JSONRPCMessage.model_validate_json(raw_text)
-                        await read_stream_writer.send(message)
-                    except ValidationError as exc:
-                        # If JSON parse or model validation fails, send the exception
-                        await read_stream_writer.send(exc)
-                    except Exception as exc:
-                        logger.exception(f"Error processing NATS message: {exc}")
-                        await read_stream_writer.send(exc)
-        except anyio.ClosedResourceError:
-            logger.debug("NATS reader closed")
-        finally:
-            # Unsubscribe when done
-            await sub.unsubscribe()
+    # Map of notification subscriptions
+    subscriptions = {}
     
-    async def nats_writer():
-        """Reads messages from write_stream_reader and publishes them to NATS."""
+    # Set up notification subscriptions if provided
+    if params.subscription_subjects:
+        for notification_type, subject in params.subscription_subjects.items():
+            async def notification_handler(msg):
+                try:
+                    raw_text = msg.data.decode('utf-8')
+                    message = types.JSONRPCMessage.model_validate_json(raw_text)
+                    await read_stream_writer.send(message)
+                except ValidationError as exc:
+                    await read_stream_writer.send(exc)
+                except Exception as exc:
+                    logger.exception(f"Error processing notification: {exc}")
+                    await read_stream_writer.send(exc)
+            
+            sub = await nc.subscribe(subject, cb=notification_handler)
+            subscriptions[notification_type] = sub
+            logger.debug(f"Subscribed to {notification_type} notifications on subject {subject}")
+    
+    # Subscribe to general notifications
+    notification_subject = f"{params.service_name}.notifications.>"
+    
+    async def handle_notification(msg):
+        try:
+            raw_text = msg.data.decode('utf-8')
+            message = types.JSONRPCMessage.model_validate_json(raw_text)
+            await read_stream_writer.send(message)
+        except ValidationError as exc:
+            await read_stream_writer.send(exc)
+        except Exception as exc:
+            logger.exception(f"Error processing notification: {exc}")
+            await read_stream_writer.send(exc)
+    
+    notification_sub = await nc.subscribe(notification_subject, cb=handle_notification)
+    logger.debug(f"Subscribed to notifications on {notification_subject}")
+    
+    async def request_handler():
+        """Reads messages from write_stream_reader and sends requests to the server."""
         try:
             async with write_stream_reader:
                 async for message in write_stream_reader:
-                    # Convert to a dict, then to JSON
-                    msg_dict = message.model_dump(
-                        by_alias=True, mode="json", exclude_none=True
-                    )
-                    json_data = json.dumps(msg_dict)
+                    # Check if this is a request or notification
+                    is_request = isinstance(message.root, types.JSONRPCRequest)
                     
-                    # Publish to request subject
-                    await nc.publish(
-                        params.request_subject,
-                        json_data.encode('utf-8')
-                    )
-                    logger.debug(f"Published message to {params.request_subject}")
+                    # Convert to JSON
+                    message_json = message.model_dump_json(by_alias=True, exclude_none=True)
+                    
+                    if is_request:
+                        # For requests, use request/reply pattern
+                        method_name = message.root.method
+                        subject = f"{params.service_name}.{method_name}"
+                        
+                        try:
+                            # Use the NATS request method for proper request/reply
+                            logger.debug(f"Sending request to {subject}")
+                            response = await nc.request(
+                                subject, 
+                                message_json.encode('utf-8'),
+                                timeout=params.request_timeout
+                            )
+                            
+                            # Process the response
+                            try:
+                                response_text = response.data.decode('utf-8')
+                                response_message = types.JSONRPCMessage.model_validate_json(response_text)
+                                await read_stream_writer.send(response_message)
+                            except ValidationError as exc:
+                                await read_stream_writer.send(exc)
+                        except Exception as exc:
+                            # Create an error response if the request fails
+                            logger.exception(f"Error sending request: {exc}")
+                            request_id = message.root.id
+                            error_response = types.JSONRPCError(
+                                jsonrpc="2.0",
+                                id=request_id,
+                                error=types.ErrorData(
+                                    code=-32000,  # Generic error code
+                                    message=f"Request failed: {str(exc)}",
+                                    data=None
+                                )
+                            )
+                            error_message = types.JSONRPCMessage.model_validate(error_response)
+                            await read_stream_writer.send(error_message)
+                    else:
+                        # For notifications, just publish
+                        method_name = message.root.method
+                        subject = f"{params.service_name}.{method_name}"
+                        
+                        logger.debug(f"Publishing notification to {subject}")
+                        await nc.publish(subject, message_json.encode('utf-8'))
         except anyio.ClosedResourceError:
-            logger.debug("NATS writer closed")
+            logger.debug("Request handler closed")
     
     try:
-        # Start reader and writer tasks
+        # Start the request handler task
         async with anyio.create_task_group() as tg:
-            tg.start_soon(nats_reader)
-            tg.start_soon(nats_writer)
+            tg.start_soon(request_handler)
             
             # Yield the streams to the caller
             yield (read_stream, write_stream)
@@ -149,6 +197,12 @@ async def nats_client(params: NatsClientParameters):
             # Once the caller's 'async with' block exits, we cancel the task group
             tg.cancel_scope.cancel()
     finally:
+        # Clean up subscriptions
+        for sub in subscriptions.values():
+            await sub.unsubscribe()
+        
+        await notification_sub.unsubscribe()
+        
         # Close NATS connection when done
         await nc.close()
         logger.info("NATS connection closed")
