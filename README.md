@@ -159,6 +159,39 @@ asyncio.run(run_client('nats://localhost:4222'))
 
 Then run each script in a separate terminal after starting the NATS server.
 
+## Implementation Details
+
+The NATS transport for MCP implements the JSON-RPC 2.0 protocol on top of NATS messaging system, with several key features:
+
+### NATS Services API Integration
+
+The implementation uses the NATS request/reply pattern through its Services API:
+
+1. **Server-side**:
+   - Uses proper NATS service handlers with reply subjects
+   - Maps JSON-RPC methods to service subjects (`service_name.method`)
+   - Tracks in-flight requests for response correlation
+   - Returns responses via the reply subject mechanism
+
+2. **Client-side**:
+   - Uses the `nc.request()` method for proper request/reply pattern
+   - Automatically handles request timeouts
+   - Manages correlation between requests and responses
+   - Subscribes to notification channels for non-request messages
+
+3. **Subject Structure**:
+   - Main requests: `service_name.method_name`
+   - Notifications: `service_name.notifications.type`
+   - Service discovery happens automatically through subject wildcards
+
+4. **Error Handling**:
+   - Proper propagation of JSON-RPC errors
+   - Timeout configuration and management
+   - Automatic reconnection handling
+   - Exception mapping to appropriate JSON-RPC error codes
+
+This approach ensures reliable message delivery, proper correlation between requests and responses, and efficient routing of messages.
+
 ## Documentation
 
 For more detailed documentation, see [the documentation](./docs/README.md).
@@ -169,6 +202,7 @@ Check out the examples directory for more usage patterns:
 
 - [Simple Example](./examples/simple_example.py): Basic usage of NATS transport
 - [Distributed Example](./examples/distributed_example.py): Advanced distributed deployment with multiple servers and clients
+- [Docker Example](./docker-example.py): Simplified example demonstrating NATS request/reply pattern
 
 ## Architecture
 
