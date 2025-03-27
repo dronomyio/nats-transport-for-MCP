@@ -105,17 +105,21 @@ async def nats_server(params: NatsServerParameters):
     # Function to handle incoming requests
     async def handle_request(msg: Msg):
         try:
-            # Parse the message data as JSON-RPC
-            raw_text = msg.data.decode('utf-8')
-            request = types.JSONRPCMessage.model_validate_json(raw_text)
+            # Parse the message data as JSON-RPC  
+            #Decode NATS message data to text Request Parsing (lines 106-119):
+            raw_text = msg.data.decode('utf-8') 
+            #Parse text as JSON-RPC message Request Parsing (lines 106-119):
+            request = types.JSONRPCMessage.model_validate_json(raw_text) 
             
-            # Check if this is a request (has an ID) or a notification (no ID)
+            # Check if this is a request (has an ID) or a notification (no ID) 
+            #Check if it's a request or notification based on JSON-RPC Request Parsing (lines 106-119):
             is_request = isinstance(request.root, types.JSONRPCRequest)
             
-            # Forward the message to the MCP server through the read_stream
+            # Forward the message to the MCP server through the read_stream 
+            #Forward JSON-RPC message to MCP via streams Request Parsing (lines 106-119):
             await read_stream_writer.send(request)
-            
-            if is_request:
+            #Track request IDs for response correlation
+            if is_request: 
                 # For requests, keep track of it to match with response later
                 request_id = str(request.root.id)
                 in_flight_requests[request_id] = (msg, request)
@@ -151,22 +155,26 @@ async def nats_server(params: NatsServerParameters):
         try:
             async with write_stream_reader:
                 async for message in write_stream_reader:
-                    # Check if this is a response to a request
+                    # Check if this is a response to a request 
+                    #Identify if message is a JSON-RPC response Response Handling (lines 150-174)
                     is_response = isinstance(message.root, (types.JSONRPCResponse, types.JSONRPCError))
                     
                     if is_response:
-                        # Get the request ID
+                        # Get the request ID  
+                        #Extract request ID from JSON-RPC message Response Handling (lines 150-174)
                         response_id = str(message.root.id)
                         
                         # Find the matching request
                         if response_id in in_flight_requests:
                             msg, request = in_flight_requests.pop(response_id)
                             
-                            # Convert the response to JSON
+                            # Convert the response to JSON 
+                            #Serialize JSON-RPC response to JSON text Response Handling (lines 150-174)
                             response_json = message.model_dump_json(by_alias=True, exclude_none=True)
                             
                             # If the client is expecting a reply, send it
-                            if msg.reply:
+                            if msg.reply: 
+                                #Send JSON-RPC response via NATS reply subject Response Handling (lines 150-174)
                                 await msg.respond(response_json.encode('utf-8'))
                                 logger.debug(f"Sent response for request {response_id}")
                             else:
