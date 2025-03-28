@@ -192,6 +192,65 @@ The implementation uses the NATS request/reply pattern through its Services API:
 
 This approach ensures reliable message delivery, proper correlation between requests and responses, and efficient routing of messages.
 
+### Asynchronous Callbacks for Long-Running Operations
+
+The NATS transport includes support for asynchronous callbacks, enabling long-running operations without blocking:
+
+1. **Callback System**:
+   - Client registers a callback for receiving async results
+   - Server acknowledges requests immediately
+   - Server processes requests in the background
+   - Results are delivered via dedicated callback subjects when ready
+
+2. **Progress Reporting**:
+   - Support for progress updates during long-running operations
+   - Server can send incremental progress notifications
+   - Client can monitor progress of async operations
+
+3. **Extensions API**:
+   - `CallbackEnabledClient` - Client extension for async operations
+   - `CallbackEnabledServer` - Server extension for handling callbacks
+   - `async_tool` decorator for creating progress-aware tools
+
+4. **Example Usage (Client)**:
+   ```python
+   # Create callback-enabled client
+   callback_client = CallbackEnabledClient(mcp_client, nats_client)
+   
+   # Start async operation
+   task = await callback_client.call_tool_async(
+       "generate_report", 
+       {"report_type": "Financial", "size": 500}
+   )
+   task_id = task["callback_id"]
+   
+   # Do other work while operation runs...
+   
+   # Get result when needed
+   result = await callback_client.get_async_result(task_id)
+   ```
+
+5. **Example Usage (Server)**:
+   ```python
+   # Create callback-enabled server
+   callback_server = CallbackEnabledServer(server, nats_client)
+   
+   # Register async-aware tool with progress reporting
+   @async_tool
+   async def generate_report(report_type, size, report_progress=None):
+       # Start long operation
+       for i in range(size):
+           # Do work...
+           
+           # Report progress
+           if report_progress:
+               await report_progress(i/size, size, "Processing...")
+               
+       return "Completed report"
+   ```
+
+This callback mechanism is particularly valuable for distributed deployments with long-running operations such as ML inference, large text generation, or data processing tasks.
+
 ## Documentation
 
 For more detailed documentation, see [the documentation](./docs/README.md).
@@ -203,6 +262,7 @@ Check out the examples directory for more usage patterns:
 - [Simple Example](./examples/simple_example.py): Basic usage of NATS transport
 - [Distributed Example](./examples/distributed_example.py): Advanced distributed deployment with multiple servers and clients
 - [Docker Example](./docker-example.py): Simplified example demonstrating NATS request/reply pattern
+- [Callback Example](./examples/callback_example.py): Asynchronous operations with callbacks and progress reporting
 
 ## Architecture
 
