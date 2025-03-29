@@ -3,13 +3,23 @@ NATS Server Transport Module
 
 This module provides functionality for creating a NATS-based transport layer
 that can be used to communicate with an MCP client through NATS messaging system.
+It uses the NATS micro-services API for better service discovery and monitoring.
+
+Features:
+- Full integration with NATS JetStream micro-services API
+- Service discovery and observability through 'nats service' commands
+- Automatic stats collection and monitoring
+- Fallback to traditional NATS subscriptions when micro-services API is not available
 
 Example usage:
 ```
     async def run_server():
         nats_config = NatsServerParameters(
             url="nats://localhost:4222",
-            service_name="mcp.service"
+            service_name="mcp.service",
+            description="My MCP Service",
+            version="1.0.0",
+            metadata={"environment": "production"}
         )
         async with nats_server(nats_config) as (read_stream, write_stream):
             # read_stream contains incoming JSONRPCMessages from clients
@@ -19,19 +29,40 @@ Example usage:
 
     anyio.run(run_server)
 ```
+
+When the server is running, you can use NATS CLI to view service information:
+```
+    nats service list               # List all services
+    nats service info mcp.service   # Get info about the MCP service
+    nats service stats mcp.service  # View service statistics
+```
 """
 
 import json
 import logging
 import uuid
+import time
 from contextlib import asynccontextmanager
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List, Any
 
 import anyio
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from nats.aio.client import Client as NatsClient
 from nats.aio.msg import Msg
 from pydantic import BaseModel, Field
+
+try:
+    # Import micro module if available (NATS 2.2.0+)
+    from nats.micro import Service, ServiceConfig, ServiceStats
+    HAS_MICRO = True
+except ImportError:
+    HAS_MICRO = False
+    # Fallback definitions if micro module is not available
+    Service = None
+    ServiceConfig = None
+    ServiceStats = None
+    logger = logging.getLogger(__name__)
+    logger.warning("NATS micro module not available. Using fallback implementation.")
 
 import mcp.types as types
 
@@ -50,17 +81,28 @@ class NatsServerParameters(BaseModel):
     server_id: str = Field(default_factory=lambda: f"mcp-server-{uuid.uuid4().hex[:8]}")
     """A unique identifier for this server."""
     
-    queue_group: Optional[str] = None
-    """
-    Queue group for load balancing requests across multiple servers.
-    If None, a queue group based on server_id will be used.
-    """
+    description: Optional[str] = "MCP Server using NATS transport"
+    """Description of the service for service discovery."""
+    
+    version: str = "1.0.0"
+    """Version of the service."""
+    
+    metadata: Optional[Dict[str, str]] = None
+    """Additional metadata for the service."""
     
     connect_timeout: float = 10.0
     """Timeout in seconds for connecting to the NATS server."""
     
     service_timeout: float = 30.0
     """Timeout in seconds for service requests."""
+    
+    # Fallback to queue groups if micro module is not available
+    queue_group: Optional[str] = None
+    """
+    Queue group for load balancing requests across multiple servers.
+    Only used if the micro module is not available.
+    If None, a queue group based on server_id will be used.
+    """
 
 
 @asynccontextmanager
@@ -99,27 +141,20 @@ async def nats_server(params: NatsServerParameters):
     # Keep track of in-flight requests by their ID
     in_flight_requests: Dict[str, Tuple[Msg, types.JSONRPCMessage]] = {}
     
-    # Create queue group if not specified
-    queue_group = params.queue_group or f"mcp-servers-{params.service_name}"
-    
     # Function to handle incoming requests
     async def handle_request(msg: Msg):
         try:
-            # Parse the message data as JSON-RPC  
-            #Decode NATS message data to text Request Parsing (lines 106-119):
-            raw_text = msg.data.decode('utf-8') 
-            #Parse text as JSON-RPC message Request Parsing (lines 106-119):
-            request = types.JSONRPCMessage.model_validate_json(raw_text) 
+            # Parse the message data as JSON-RPC
+            raw_text = msg.data.decode('utf-8')
+            request = types.JSONRPCMessage.model_validate_json(raw_text)
             
-            # Check if this is a request (has an ID) or a notification (no ID) 
-            #Check if it's a request or notification based on JSON-RPC Request Parsing (lines 106-119):
+            # Check if this is a request (has an ID) or a notification (no ID)
             is_request = isinstance(request.root, types.JSONRPCRequest)
             
-            # Forward the message to the MCP server through the read_stream 
-            #Forward JSON-RPC message to MCP via streams Request Parsing (lines 106-119):
+            # Forward the message to the MCP server through the read_stream
             await read_stream_writer.send(request)
-            #Track request IDs for response correlation
-            if is_request: 
+            
+            if is_request:
                 # For requests, keep track of it to match with response later
                 request_id = str(request.root.id)
                 in_flight_requests[request_id] = (msg, request)
@@ -144,37 +179,28 @@ async def nats_server(params: NatsServerParameters):
                 }
                 await msg.respond(json.dumps(error_response).encode('utf-8'))
     
-    # Subscribe to the service subject
-    service_subject = f"{params.service_name}.>"
-    sub = await nc.subscribe(service_subject, queue=queue_group, cb=handle_request)
-    
-    logger.info(f"Subscribed to service subject {service_subject} with queue group {queue_group}")
-    
+    # Handle responses from the MCP server
     async def handle_responses():
         """Reads messages from write_stream_reader and sends responses."""
         try:
             async with write_stream_reader:
                 async for message in write_stream_reader:
-                    # Check if this is a response to a request 
-                    #Identify if message is a JSON-RPC response Response Handling (lines 150-174)
+                    # Check if this is a response to a request
                     is_response = isinstance(message.root, (types.JSONRPCResponse, types.JSONRPCError))
                     
                     if is_response:
-                        # Get the request ID  
-                        #Extract request ID from JSON-RPC message Response Handling (lines 150-174)
+                        # Get the request ID
                         response_id = str(message.root.id)
                         
                         # Find the matching request
                         if response_id in in_flight_requests:
                             msg, request = in_flight_requests.pop(response_id)
                             
-                            # Convert the response to JSON 
-                            #Serialize JSON-RPC response to JSON text Response Handling (lines 150-174)
+                            # Convert the response to JSON
                             response_json = message.model_dump_json(by_alias=True, exclude_none=True)
                             
                             # If the client is expecting a reply, send it
-                            if msg.reply: 
-                                #Send JSON-RPC response via NATS reply subject Response Handling (lines 150-174)
+                            if msg.reply:
                                 await msg.respond(response_json.encode('utf-8'))
                                 logger.debug(f"Sent response for request {response_id}")
                             else:
@@ -192,6 +218,86 @@ async def nats_server(params: NatsServerParameters):
                             await nc.publish(subject, response_json.encode('utf-8'))
         except anyio.ClosedResourceError:
             logger.debug("Response handler closed")
+    
+    # Check if micro module is available and use it if possible
+    if HAS_MICRO:
+        try:
+            # Create a micro service
+            config = ServiceConfig(
+                name=params.service_name,
+                version=params.version,
+                description=params.description,
+                metadata=params.metadata or {}
+            )
+            
+            # Create the service
+            service = Service(nc, config)
+            
+            # Add endpoints for each MCP method using the dynamic method pattern
+            # We need to add an endpoint that captures all possible method calls
+            # In NATS micro, we use '>' as the wildcard for capturing all tokens
+            await service.add_endpoint(">", handle_request)
+            
+            # Start the service
+            await service.start()
+            
+            logger.info(f"Started NATS micro service: {params.service_name} with ID {params.server_id}")
+            
+            # Define a task to periodically log service stats
+            async def log_service_stats():
+                while True:
+                    try:
+                        stats = await service.stats()
+                        logger.info(f"Service stats: Endpoints: {len(stats.endpoints)}, "
+                                   f"Requests: {stats.total_requests}, "
+                                   f"Errors: {stats.total_errors}, "
+                                   f"Average processing time: {stats.average_processing_time:.2f}ms")
+                    except Exception as e:
+                        logger.error(f"Error getting service stats: {e}")
+                    await anyio.sleep(60)  # Log stats every minute
+            
+            try:
+                # Start the response handler task and stats logging
+                async with anyio.create_task_group() as tg:
+                    tg.start_soon(handle_responses)
+                    tg.start_soon(log_service_stats)
+                    
+                    # Yield the streams to the caller
+                    yield (read_stream, write_stream)
+                    
+                    # Once the caller's 'async with' block exits, we cancel the task group
+                    tg.cancel_scope.cancel()
+            finally:
+                # Stop the service
+                await service.stop()
+                
+                # Close NATS connection when done
+                await nc.close()
+                logger.info("NATS micro service stopped and connection closed")
+                
+        except Exception as exc:
+            logger.exception(f"Error starting NATS micro service: {exc}")
+            # Fall back to using regular subscription
+            logger.warning("Falling back to regular NATS subscription")
+            await _fallback_subscription(nc, params, handle_request, handle_responses, 
+                                      read_stream, write_stream, read_stream_writer, write_stream_reader)
+    else:
+        # Use regular subscription as fallback
+        await _fallback_subscription(nc, params, handle_request, handle_responses, 
+                                  read_stream, write_stream, read_stream_writer, write_stream_reader)
+
+
+async def _fallback_subscription(nc, params, handle_request, handle_responses, 
+                              read_stream, write_stream, read_stream_writer, write_stream_reader):
+    """Fallback to using regular subscription if micro module is not available."""
+    # Create queue group if not specified
+    queue_group = params.queue_group or f"mcp-servers-{params.service_name}"
+    
+    # Subscribe to the service subject
+    service_subject = f"{params.service_name}.>"
+    sub = await nc.subscribe(service_subject, queue=queue_group, cb=handle_request)
+    
+    logger.info(f"Subscribed to service subject {service_subject} with queue group {queue_group}")
     
     try:
         # Start the response handler task

@@ -1,10 +1,17 @@
 """
-Example demonstrating how to use NATS transport with MCP.
+Example demonstrating how to use NATS transport with MCP using the NATS micro-services API.
 
 This example shows:
-1. Setting up a NATS-based MCP server
+1. Setting up a NATS-based MCP server using the NATS micro-services API
 2. Connecting to it with a NATS-based MCP client
-3. Exchanging messages between them using the NATS services API
+3. Exchanging messages between them
+4. Monitoring service statistics and health
+
+The NATS micro-services API provides:
+- Built-in service discovery
+- Health monitoring and statistics
+- Load balancing across multiple service instances
+- Command-line tools for service inspection
 
 Requirements:
 - NATS server running (e.g., `docker run -p 4222:4222 nats`)
@@ -13,6 +20,13 @@ Requirements:
 Run this example:
 ```
 python -m examples.simple_example
+```
+
+While the server is running, you can use the NATS CLI to monitor it:
+```
+nats service list               # List all services
+nats service info mcp.service   # Get detailed info about the service
+nats service stats mcp.service  # View service statistics
 ```
 """
 
@@ -62,6 +76,12 @@ async def run_server():
         url="nats://localhost:4222",
         service_name="mcp.service",
         server_id="echo-server-1",
+        description="MCP Echo Service Example",
+        version="1.0.0",
+        metadata={
+            "type": "example",
+            "environment": "development"
+        }
     )
     
     logger.info("Starting MCP server with NATS transport")

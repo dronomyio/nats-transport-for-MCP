@@ -5,9 +5,11 @@ NATS transport implementation for Model Context Protocol (MCP). This package ena
 ## Features
 
 - NATS client transport implementation
-- NATS server transport implementation
+- NATS server transport with micro-services API support
+- Service discovery, monitoring, and statistics via NATS services
+- Built-in observability with NATS CLI for service inspection
 - Support for distributed MCP deployments
-- Service discovery and load balancing
+- Load balancing across multiple service instances
 - High availability and fault tolerance
 
 ## Installation
@@ -36,11 +38,16 @@ async def echo(text: str) -> str:
 server = FastMcpServer()
 server.tools.register(echo)
 
-# Configure NATS transport
+# Configure NATS transport with micro-services API
 nats_params = NatsServerParameters(
     url="nats://localhost:4222",
-    request_subject="mcp.request",
-    response_subject="mcp.response",
+    service_name="mcp.service",
+    server_id="echo-server-1",
+    description="MCP Echo Service",
+    version="1.0.0",
+    metadata={
+        "environment": "development"
+    }
 )
 
 # Start the server using NATS transport
@@ -58,8 +65,8 @@ from mcp_nats_transport import NatsClientParameters, nats_client
 # Configure NATS transport
 nats_params = NatsClientParameters(
     url="nats://localhost:4222",
-    request_subject="mcp.request",
-    response_subject="mcp.response",
+    service_name="mcp.service",
+    client_id="echo-client-1"
 )
 
 # Connect to the server using NATS transport
@@ -182,9 +189,22 @@ The implementation uses the NATS request/reply pattern through its Services API:
 3. **Subject Structure**:
    - Main requests: `service_name.method_name`
    - Notifications: `service_name.notifications.type`
-   - Service discovery happens automatically through subject wildcards
+   - Service discovery happens automatically through micro-services API
 
-4. **Error Handling**:
+4. **NATS Micro-Services API**:
+   - Services automatically register with the NATS server
+   - Built-in metrics for service health and performance
+   - Request count, error rates, and latency tracking
+   - Service endpoint discovery
+   - Management through NATS CLI commands:
+     ```bash
+     nats service list               # List all services
+     nats service info mcp.service   # Get detailed service information
+     nats service stats mcp.service  # View service statistics
+     nats service monitor mcp.service # Monitor service performance
+     ```
+
+5. **Error Handling**:
    - Proper propagation of JSON-RPC errors
    - Timeout configuration and management
    - Automatic reconnection handling
