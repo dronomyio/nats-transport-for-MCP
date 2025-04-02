@@ -18,7 +18,7 @@ COPY uns_nats_integration/requirements.txt /app/
 RUN if [ ! -d "/app/UNS-MCP" ]; then \
     echo "ERROR: UNS-MCP directory not found" && \
     echo "Please clone the UNS-MCP repository first:" && \
-    echo "git clone https://github.com/unstructured-io/uns-mcp.git UNS-MCP" && \
+    echo "git clone https://github.com/Unstructured-IO/UNS-MCP.git UNS-MCP" && \
     exit 1; \
     fi
 

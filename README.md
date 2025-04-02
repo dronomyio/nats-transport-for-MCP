@@ -22,7 +22,7 @@ This repository now includes a complete integration of UNS-MCP (Unstructured API
 
 1. Clone the UNS-MCP repository (contact Unstructured for access if necessary):
    ```bash
-   git clone https://github.com/unstructured-io/uns-mcp.git UNS-MCP
+   git clone https://github.com/Unstructured-IO/UNS-MCP.git UNS-MCP
    ```
 
 2. Clone this repository:

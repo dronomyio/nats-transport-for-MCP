@@ -56,7 +56,7 @@ parent_directory/
 
 1. Clone the UNS-MCP repository (if you have access):
    ```bash
-   git clone https://github.com/unstructured-io/uns-mcp.git UNS-MCP
+   git clone https://github.com/Unstructured-IO/UNS-MCP.git UNS-MCP
    ```
 
 2. Clone this repository:
