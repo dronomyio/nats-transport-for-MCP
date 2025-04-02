@@ -12,6 +12,51 @@ NATS transport implementation for Model Context Protocol (MCP). This package ena
 - Load balancing across multiple service instances
 - High availability and fault tolerance
 
+## New: UNS-MCP with NATS.io Integration
+
+This repository now includes a complete integration of UNS-MCP (Unstructured API MCP Server) with NATS.io transport.
+
+### Quick Start with UNS-MCP Integration
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/dronomyio/nats-transport-for-MCP.git
+   cd nats-transport-for-MCP
+   ```
+
+2. Create a `.env` file in the root directory with your API keys:
+   ```
+   UNSTRUCTURED_API_KEY=your_unstructured_api_key
+   ANTHROPIC_API_KEY=your_anthropic_api_key
+   ```
+
+3. Start the services using Docker Compose:
+   ```bash
+   docker-compose -f uns_nats_integration/docker-compose.yml up -d
+   ```
+
+4. Connect to the interactive client:
+   ```bash
+   docker-compose -f uns_nats_integration/docker-compose.yml exec uns-mcp-client python /app/uns_nats_integration/client.py
+   ```
+
+### Running the UNS-MCP Examples
+
+To run the UNS-MCP examples:
+
+```bash
+# Start the services if not already running
+docker-compose -f uns_nats_integration/docker-compose.yml up -d
+
+# Run the simple workflow example
+docker-compose -f uns_nats_integration/docker-compose.yml exec uns-mcp-client python /app/uns_nats_integration/examples/simple_workflow.py
+
+# Run the AI-assisted workflow example
+docker-compose -f uns_nats_integration/docker-compose.yml exec uns-mcp-client python /app/uns_nats_integration/examples/simple_workflow.py --ai
+```
+
+For more details on the UNS-MCP integration, see [the UNS-MCP Integration README](uns_nats_integration/README.md).
+
 ## Installation
 
 ```bash
@@ -283,337 +328,11 @@ Check out the examples directory for more usage patterns:
 - [Distributed Example](./examples/distributed_example.py): Advanced distributed deployment with multiple servers and clients
 - [Docker Example](./docker-example.py): Simplified example demonstrating NATS request/reply pattern
 - [Callback Example](./examples/callback_example.py): Asynchronous operations with callbacks and progress reporting
+- [UNS-MCP Examples](./uns_nats_integration/examples/): Examples for the UNS-MCP integration with NATS
 
 ## Architecture
 
 ![NATS Transport Architecture](./docs/architecture.svg)
-
-## Distributed Multi-Cloud Setup
-
-You can deploy MCP servers with NATS transport across multiple cloud providers to create a distributed, cross-cloud AI/ML architecture. Below is an example of deploying fine-tuned LLMs on different cloud platforms:
-
-### Architecture Overview
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│    AWS EC2      │     │ NATS.io Server  │     │  GCP Instance   │
-│ Llama 3 (FT)    │     │    (AWS EC2)    │     │ Llama 2 (FT)    │
-│ MCP Server 1    │     │                 │     │ MCP Server 2    │
-└────────┬────────┘     └────────┬────────┘     └────────┬────────┘
-         │                       │                       │
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                                 │
-                          ┌──────┴───────┐
-                          │ Your App     │
-                          │ (MCP Client) │
-                          │ Any Location │
-                          └──────────────┘
-```
-
-### 1. Set Up NATS Server (AWS EC2)
-
-```bash
-# Provision EC2 instance
-aws ec2 run-instances --image-id ami-xxxxxxxxx --instance-type t3.medium --key-name your-key
-
-# SSH into instance and install Docker
-ssh -i your-key.pem ec2-user@your-nats-instance
-sudo yum update -y && sudo yum install -y docker
-sudo service docker start
-sudo usermod -a -G docker ec2-user
-
-# Create NATS config
-mkdir -p ~/nats/config
-cat > ~/nats/config/nats.conf << EOF
-jetstream {
-  store_dir: "/data"
-  max_mem: 1G
-  max_file: 10G
-}
-
-# Authentication
-accounts {
-  MCP {
-    users: [
-      {user: "mcp", password: "your-secure-password"}
-    ]
-  }
-}
-EOF
-
-# Run NATS with Docker
-docker run -d --name nats-server \
-  -p 4222:4222 -p 8222:8222 \
-  -v ~/nats/config:/etc/nats \
-  -v ~/nats/data:/data \
-  nats:latest -c /etc/nats/nats.conf
-```
-
-Configure security groups to allow inbound traffic on ports 4222 and 8222.
-
-### 2. Deploy MCP Server with Llama 3 on AWS
-
-```bash
-# Install dependencies
-pip3 install --upgrade pip
-pip3 install mcp-nats-transport llama-cpp-python
-
-# Create server script
-cat > ~/mcp-server-llama3/server.py << EOF
-import asyncio
-import logging
-from mcp.server.fastmcp.server import FastMcpServer
-from mcp.server.fastmcp.tools import tool
-from mcp.shared.session import Session
-from mcp_nats_transport import NatsServerParameters, nats_server
-from llama_cpp import Llama
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Initialize Llama model
-model = Llama(
-    model_path="/home/ec2-user/models/llama3-ft-model.bin",
-    n_ctx=4096,
-    n_gpu_layers=-1
-)
-
-# Define LLM tool
-@tool
-async def llama3_generate(prompt: str, max_tokens: int = 1000, temperature: float = 0.7) -> str:
-    """Generate text using fine-tuned Llama 3 model."""
-    output = model(prompt, max_tokens=max_tokens, temperature=temperature)
-    return output["choices"][0]["text"]
-
-async def main():
-    # Create MCP server
-    server = FastMcpServer()
-    server.tools.register(llama3_generate)
-    
-    # Configure NATS transport
-    nats_params = NatsServerParameters(
-        url="nats://mcp:your-secure-password@your-nats-instance:4222",
-        service_name="mcp.llama3",
-        server_id="llama3-server"
-    )
-    
-    # Start server with NATS transport
-    async with nats_server(nats_params) as (read_stream, write_stream):
-        session = Session()
-        await server.run(session, read_stream, write_stream)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-EOF
-
-# Create systemd service
-sudo systemctl enable mcp-llama3
-sudo systemctl start mcp-llama3
-```
-
-### 3. Deploy MCP Server with Llama 2 on GCP
-
-```bash
-# SSH into GCP instance
-gcloud compute ssh llama2-instance
-
-# Install dependencies
-pip3 install mcp-nats-transport transformers torch
-
-# Create server script
-cat > ~/mcp-server-llama2/server.py << EOF
-import asyncio
-import logging
-from mcp.server.fastmcp.server import FastMcpServer
-from mcp.server.fastmcp.tools import tool
-from mcp.shared.session import Session
-from mcp_nats_transport import NatsServerParameters, nats_server
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Initialize Llama 2 model
-tokenizer = AutoTokenizer.from_pretrained("/home/user/models/llama2-ft")
-model = AutoModelForCausalLM.from_pretrained(
-    "/home/user/models/llama2-ft",
-    device_map="auto"
-)
-
-# Define LLM tool
-@tool
-async def llama2_generate(prompt: str, max_tokens: int = 1000, temperature: float = 0.7) -> str:
-    """Generate text using fine-tuned Llama 2 model."""
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-    outputs = model.generate(
-        inputs["input_ids"],
-        max_new_tokens=max_tokens,
-        temperature=temperature,
-        do_sample=True
-    )
-    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return response[len(prompt):]
-
-async def main():
-    # Create MCP server
-    server = FastMcpServer()
-    server.tools.register(llama2_generate)
-    
-    # Configure NATS transport
-    nats_params = NatsServerParameters(
-        url="nats://mcp:your-secure-password@your-nats-instance:4222",
-        service_name="mcp.llama2",
-        server_id="llama2-server"
-    )
-    
-    # Start server with NATS transport
-    async with nats_server(nats_params) as (read_stream, write_stream):
-        session = Session()
-        await server.run(session, read_stream, write_stream)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-EOF
-```
-
-### 4. Create Client Application
-
-Your application can run anywhere with network access to the NATS server:
-
-```python
-import asyncio
-import logging
-from mcp.client.session import ClientSession
-from mcp_nats_transport import NatsClientParameters, nats_client
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-async def run_client():
-    # Configure NATS transport
-    nats_params = NatsClientParameters(
-        url="nats://mcp:your-secure-password@your-nats-instance:4222",
-        service_name="mcp",  # Will discover all MCP services
-        client_id="my-app-client"
-    )
-    
-    # Connect to NATS
-    async with nats_client(nats_params) as (read_stream, write_stream):
-        # Create client session
-        client = ClientSession()
-        await client.initialize(read_stream, write_stream)
-        
-        # Discover available tools
-        tools = await client.list_tools()
-        logger.info(f"Available tools: {[tool.name for tool in tools.tools]}")
-        
-        # Call Llama 3 on AWS
-        if "llama3_generate" in [t.name for t in tools.tools]:
-            result = await client.call_tool(
-                "llama3_generate", 
-                {"prompt": "Explain quantum computing", "max_tokens": 500}
-            )
-            logger.info(f"Llama 3 result: {result.content[0].text}")
-        
-        # Call Llama 2 on GCP
-        if "llama2_generate" in [t.name for t in tools.tools]:
-            result = await client.call_tool(
-                "llama2_generate", 
-                {"prompt": "Describe machine learning applications", "max_tokens": 500}
-            )
-            logger.info(f"Llama 2 result: {result.content[0].text}")
-
-if __name__ == "__main__":
-    asyncio.run(run_client())
-```
-
-### Key Benefits of This Architecture
-
-1. **Cross-Cloud Deployment**: Run specialized models on different cloud providers
-2. **Automatic Service Discovery**: Clients automatically discover all available tools 
-3. **Load Balancing**: Deploy multiple instances of each server for high availability
-4. **Location Transparency**: Clients don't need to know where servers are deployed
-5. **Scalability**: Easily add more servers or models without changing client code
-
-## Suitable Applications for Distributed MCP
-
-When designing applications for distributed MCP with NATS transport, consider latency requirements. Not all applications are well-suited for cross-cloud deployment.
-
-### Ideal Applications (Latency Tolerant)
-
-#### 1. Asynchronous Content Generation (1-10+ seconds)
-- Document generation (legal documents, reports, summaries)
-- Marketing content (blog posts, product descriptions)
-- Creative writing (stories, scripts based on prompts)
-- Code generation (boilerplate code, documentation, tests)
-
-#### 2. Batch Processing Applications (Minutes to hours)
-- Data analysis workflows processing large datasets
-- Overnight document processing (contracts, reports)
-- Media processing (generating captions, descriptions)
-- Research data mining from scientific literature
-
-#### 3. Semi-Real-Time Advisory Systems (500ms-3s)
-- Expert advisory systems (medical, legal, financial)
-- Complex customer support requiring specialized knowledge
-- Research assistants for literature reviews
-- Multi-step reasoning applications across domains
-
-#### 4. Hybrid Human-AI Workflows (Variable latency)
-- Human-in-the-loop review systems
-- Collaborative writing/coding environments
-- Decision support systems
-- Educational tools and AI tutors
-
-#### 5. Multi-Modal Applications (Variable latency)
-- Document processing (text and images)
-- Research tools processing diverse data types
-- Content creation across media types
-- Rich knowledge base querying
-
-### Less Suitable Applications (Latency Sensitive)
-
-#### 1. Conversational AI (Requires <500ms)
-- Real-time chat interfaces
-- Voice assistants
-- Interactive customer service
-
-#### 2. Real-Time Decision Systems (Requires <100ms)
-- Trading systems
-- Real-time monitoring
-- Autonomous systems
-- Gaming AI
-
-#### 3. Embedded Applications (Requires local processing)
-- Mobile app features
-- Edge devices
-- Offline-capable systems
-
-### Latency Considerations
-
-When implementing a distributed MCP system with NATS, expect:
-- **Network latency between clouds**: 50-150ms between major regions
-- **NATS message routing**: 5-20ms overhead
-- **Model inference time**: 200ms-10s+ depending on model size
-- **Request serialization/deserialization**: 5-20ms
-
-Typical round-trip latency for cross-cloud model calls:
-- **Best case**: ~500ms (small models, same region)
-- **Typical case**: 1-5 seconds (medium models, different regions)
-- **Complex case**: 5-30+ seconds (large models, complex inputs)
-
-### Optimizing for Mixed Latency Requirements
-
-For applications with mixed latency requirements:
-1. **Hybrid deployment**: Place latency-sensitive models closer to clients
-2. **Model cascading**: Use faster models first, fall back to larger models when needed
-3. **Caching**: Implement result caching for common queries
-4. **Asynchronous design**: Use callbacks or webhooks for longer-running tasks
 
 ## Requirements
 
