@@ -1,0 +1,38 @@
+# Stage 1: Clone UNS-MCP repository
+FROM alpine/git:v2.36.3 AS unsmcp-clone
+WORKDIR /src
+RUN git clone https://github.com/Unstructured-IO/UNS-MCP.git UNS-MCP
+
+# Stage 2: Build the application
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy UNS-MCP from the first stage
+COPY --from=unsmcp-clone /src/UNS-MCP /app/UNS-MCP
+
+# Copy uns-mcp-nats package
+COPY . /app/uns_mcp_nats/
+
+# Install dependencies
+RUN pip install --no-cache-dir -e /app/UNS-MCP/ \
+    && pip install --no-cache-dir -e /app/uns_mcp_nats/
+
+# Create directory for logs
+RUN mkdir -p /app/logs
+
+# Create a non-root user to run the app
+RUN useradd -m appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Set environment variables
+ENV PYTHONPATH=/app
+
+# Run the server
+CMD ["python", "-m", "uns_mcp_nats.server"]

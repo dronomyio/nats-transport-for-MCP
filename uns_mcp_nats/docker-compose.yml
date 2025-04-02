@@ -1,0 +1,69 @@
+version: '3'
+
+services:
+  nats:
+    image: nats:latest
+    ports:
+      - "4222:4222"  # Client connections
+      - "8222:8222"  # HTTP monitoring
+    command: -js -m 8222 -DV  # Enable JetStream, monitoring and debug/verbose
+    volumes:
+      - nats-data:/data
+    networks:
+      - uns-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8222/varz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  uns-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    depends_on:
+      - nats
+    environment:
+      - NATS_URL=nats://nats:4222
+      - NATS_SERVICE_NAME=uns.mcp.service
+      - UNSTRUCTURED_API_KEY=${UNSTRUCTURED_API_KEY}
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+    networks:
+      - uns-net
+    restart: unless-stopped
+    deploy:
+      replicas: 2  # Run multiple instances for load balancing
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # Interactive client
+  uns-mcp-client:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    depends_on:
+      - nats
+      - uns-mcp-server
+    environment:
+      - NATS_URL=nats://nats:4222
+      - NATS_SERVICE_NAME=uns.mcp.service
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CONFIRM_TOOL_USE=true
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+    networks:
+      - uns-net
+    stdin_open: true  # Keep STDIN open
+    tty: true  # Allocate a pseudo-TTY
+
+volumes:
+  nats-data:
+    driver: local
+
+networks:
+  uns-net:
+    driver: bridge
