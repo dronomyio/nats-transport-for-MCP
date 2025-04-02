@@ -1,0 +1,15 @@
+# Core dependencies
+mcp>=0.1.0
+nats-py>=2.4.0
+unstructured-client>=0.13.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Optional dependencies
+anthropic>=0.6.0  # Required for client
+rich>=13.0.0      # Enhanced CLI experience
+httpx>=0.25.0     # For custom HTTP client
+
+# Development dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
