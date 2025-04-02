@@ -1,0 +1,28 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install dependencies first to leverage Docker caching
+COPY UNS-MCP/pyproject.toml UNS-MCP/
+COPY nats-transport/pyproject.toml nats-transport/
+COPY uns_nats_integration/requirements.txt .
+
+RUN pip install --no-cache-dir -e UNS-MCP/ \
+    && pip install --no-cache-dir -e nats-transport/ \
+    && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir rich anthropic
+
+# Copy application code
+COPY nats-transport/ nats-transport/
+COPY uns_nats_integration/ uns_nats_integration/
+
+# Create a non-root user to run the app
+RUN useradd -m appuser
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Set environment variables
+ENV PYTHONPATH=/app
+
+# Run the client
+CMD ["python", "uns_nats_integration/client.py"]
