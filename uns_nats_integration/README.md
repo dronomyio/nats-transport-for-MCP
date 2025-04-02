@@ -134,4 +134,4 @@ To develop the UNS-MCP integration without Docker:
 
 ## License
 
-This project is licensed under the MIT License.
+This project is licensed under the dronomy.io License.
