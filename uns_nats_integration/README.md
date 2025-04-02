@@ -2,6 +2,15 @@
 
 This project integrates UNS-MCP (Unstructured API MCP Server) with NATS.io as a transport layer, enabling distributed deployment of Unstructured API tools and connectors.
 
+## Important: External Dependency
+
+⚠️ **This integration requires the UNS-MCP project code which is not included in this repository.**
+
+Before using this integration, you must:
+1. Clone the UNS-MCP repository (contact Unstructured for access if necessary)
+2. Place it in the same parent directory as this repository or install it as a package
+3. Ensure the UNS-MCP Python package is in your Python path
+
 ## Overview
 
 The Unstructured API provides tools for processing unstructured data through document processing workflows. This implementation:
@@ -24,21 +33,52 @@ The Unstructured API provides tools for processing unstructured data through doc
 - NATS server
 - Unstructured API key
 - Anthropic API key (for client)
-- Original UNS-MCP codebase accessible in the parent directory
+- Original UNS-MCP codebase accessible in the Python path
+
+## Directory Structure
+
+For this integration to work correctly, your directory structure should look like:
+
+```
+parent_directory/
+├── UNS-MCP/              # Original UNS-MCP project
+│   ├── connectors/
+│   │   ├── source/
+│   │   ├── destination/
+│   │   └── ...
+│   └── ...
+└── nats-transport-for-MCP/  # This repository
+    └── uns_nats_integration/
+        └── ...
+```
 
 ## Installation
+
+1. Clone the UNS-MCP repository (if you have access):
+   ```bash
+   git clone https://github.com/unstructured-io/uns-mcp.git UNS-MCP
+   ```
+
+2. Clone this repository:
+   ```bash
+   git clone https://github.com/dronomyio/nats-transport-for-MCP.git
+   ```
+
+3. Install dependencies:
+   ```bash
+   pip install -e ./UNS-MCP
+   pip install -e ./nats-transport-for-MCP
+   pip install unstructured-client anthropic mcp nats-py python-dotenv rich
+   ```
+
+## Usage
 
 1. Set up a NATS server:
    ```
    docker run -p 4222:4222 -p 8222:8222 --name nats-server nats:latest -js -m 8222
    ```
 
-2. Install dependencies:
-   ```
-   pip install unstructured-client anthropic mcp nats-py python-dotenv rich
-   ```
-
-3. Set up environment variables in `.env`:
+2. Set up environment variables in `.env`:
    ```
    NATS_URL=nats://localhost:4222
    NATS_SERVICE_NAME=uns.mcp.service
@@ -46,47 +86,52 @@ The Unstructured API provides tools for processing unstructured data through doc
    ANTHROPIC_API_KEY=your_anthropic_api_key
    ```
 
-## Usage
-
-1. Start the server:
-   ```
-   python server.py
+3. Start the server:
+   ```bash
+   python uns_nats_integration/server.py
    ```
 
-2. In a separate terminal, start the client:
+4. In a separate terminal, start the client:
+   ```bash
+   python uns_nats_integration/client.py
    ```
-   python client.py
-   ```
-
-3. Interact with the client by typing queries about document processing:
-   - "List available sources"
-   - "Create a workflow to process PDFs from S3"
-   - "Run workflow X and check its status"
-
-## Architecture
-
-The system follows a distributed architecture:
-
-- **Client**: Connects to NATS server, discovers MCP service, sends user queries to Claude and executes the recommended tools
-- **NATS**: Provides service discovery, load balancing, and messaging
-- **Server**: Hosts MCP tools, connects to Unstructured API, processes requests
-
-Multiple servers can be deployed for load balancing or specialized functionality, with clients automatically discovering available services through NATS.
 
 ## Docker Deployment
 
 A docker-compose file is provided for easy deployment:
 
 ```
-docker-compose up -d
+docker-compose -f uns_nats_integration/docker-compose.yml up -d
 ```
 
 This starts a NATS server, UNS-MCP server, and an optional client container.
 
+**Note:** The Dockerfiles assume that the UNS-MCP code is available in a directory at the same level as this repository.
+
 ## Development
 
-See the parent UNS-MCP project for details on adding new connectors or tools.
+To develop the UNS-MCP integration without Docker:
+
+1. Install dependencies as described above
+
+2. Set up environment variables:
+   ```bash
+   export NATS_URL=nats://localhost:4222
+   export NATS_SERVICE_NAME=uns.mcp.service
+   export UNSTRUCTURED_API_KEY=your_unstructured_api_key
+   export ANTHROPIC_API_KEY=your_anthropic_api_key
+   ```
+
+3. Start the server:
+   ```bash
+   python uns_nats_integration/server.py
+   ```
+
+4. In a separate terminal, start the client:
+   ```bash
+   python uns_nats_integration/client.py
+   ```
 
 ## License
 
-This project is licensed under the same terms as the parent UNS-MCP project.
+This project is licensed under the MIT License.

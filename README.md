@@ -16,9 +16,16 @@ NATS transport implementation for Model Context Protocol (MCP). This package ena
 
 This repository now includes a complete integration of UNS-MCP (Unstructured API MCP Server) with NATS.io transport.
 
+⚠️ **Important: External Dependency** - This integration requires the UNS-MCP project code which is not included in this repository. See the [UNS-MCP Integration README](uns_nats_integration/README.md) for setup instructions.
+
 ### Quick Start with UNS-MCP Integration
 
-1. Clone this repository:
+1. Clone the UNS-MCP repository (contact Unstructured for access if necessary):
+   ```bash
+   git clone https://github.com/unstructured-io/uns-mcp.git UNS-MCP
+   ```
+
+2. Clone this repository:
    ```bash
    git clone https://github.com/dronomyio/nats-transport-for-MCP.git
    cd nats-transport-for-MCP

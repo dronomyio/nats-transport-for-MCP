@@ -2,19 +2,30 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install dependencies first to leverage Docker caching
-COPY UNS-MCP/pyproject.toml UNS-MCP/
-COPY nats-transport/pyproject.toml nats-transport/
-COPY uns_nats_integration/requirements.txt .
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir -e UNS-MCP/ \
-    && pip install --no-cache-dir -e nats-transport/ \
-    && pip install --no-cache-dir -r requirements.txt
+# Check if UNS-MCP exists outside container, if not, provide instructions
+COPY --chown=1000:1000 ../UNS-MCP /app/UNS-MCP || echo "UNS-MCP directory not found. You need to clone it first."
 
-# Copy application code
-COPY UNS-MCP/ UNS-MCP/
-COPY nats-transport/ nats-transport/
-COPY uns_nats_integration/ uns_nats_integration/
+# Install nats-transport
+COPY --chown=1000:1000 . /app/nats-transport-for-MCP/
+COPY uns_nats_integration/requirements.txt /app/
+
+# Verify UNS-MCP presence
+RUN if [ ! -d "/app/UNS-MCP" ]; then \
+    echo "ERROR: UNS-MCP directory not found" && \
+    echo "Please clone the UNS-MCP repository first:" && \
+    echo "git clone https://github.com/unstructured-io/uns-mcp.git UNS-MCP" && \
+    exit 1; \
+    fi
+
+# Install dependencies
+RUN pip install --no-cache-dir -e /app/UNS-MCP/ \
+    && pip install --no-cache-dir -e /app/nats-transport-for-MCP/ \
+    && pip install --no-cache-dir -r /app/requirements.txt
 
 # Create directory for logs
 RUN mkdir -p /app/logs
@@ -28,4 +39,4 @@ USER appuser
 ENV PYTHONPATH=/app
 
 # Run the server
-CMD ["python", "uns_nats_integration/server.py"]
+CMD ["python", "/app/nats-transport-for-MCP/uns_nats_integration/server.py"]
